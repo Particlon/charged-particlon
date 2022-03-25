@@ -38,6 +38,8 @@ import "./interfaces/IChargedState.sol";
 import "./interfaces/IChargedSettings.sol";
 import "./interfaces/IChargedParticles.sol";
 
+import "./interfaces/IERC721Consumable.sol";
+
 // import "./lib/SignatureVerifier.sol";
 import "./interfaces/ISignatureVerifier.sol";
 
@@ -48,6 +50,7 @@ import "./lib/RelayRecipient.sol";
 contract Particlon is
     IParticlon,
     ERC721,
+    IERC721Consumable,
     Ownable,
     RelayRecipient,
     ReentrancyGuard,
@@ -56,6 +59,13 @@ contract Particlon is
     // using SafeMath for uint256; // not needed since solidity 0.8
     using TokenInfo for address payable;
     // using Counters for Counters.Counter;
+
+    address internal _signer;
+
+    /// @notice Using the same naming convention to denote current supply as ERC721Enumerable
+    uint256 public totalSupply;
+    uint256 public constant MAX_SUPPLY = 10069;
+    uint256 public constant PRICE = 0.15 ether;
 
     uint256 internal constant PERCENTAGE_SCALE = 1e4; // 10000  (100%)
     uint256 internal constant MAX_ROYALTIES = 8e3; // 8000   (80%)
@@ -66,13 +76,15 @@ contract Particlon is
     IChargedParticles internal _chargedParticles;
 
     IERC20 internal _assetToken;
+    ISignatureVerifier internal immutable _signatureVerifier; // This right here drops the size from 29kb to 15kb
 
     // Counters.Counter internal _tokenIds;
 
-    /// @notice Using the same naming convention to denote current supply as ERC721Enumerable
-    uint256 public totalSupply;
-    uint256 public constant MAX_SUPPLY = 10069;
-    uint256 public constant PRICE = 0.15 ether;
+    /// @notice The baseURI may change from an API-based to an ipfs-based
+    string internal _uri;
+    bool internal _paused;
+    // Mapping from token ID to consumer address
+    mapping(uint256 => address) _tokenConsumers;
 
     mapping(uint256 => address) internal _tokenCreator;
     mapping(uint256 => uint256) internal _tokenCreatorRoyaltiesPct;
@@ -85,14 +97,7 @@ contract Particlon is
     /// @notice Adhere to limits per whitelisted wallet for whitelist mint phase
     mapping(address => bool) internal _whitelistedAddressMinted;
 
-    bool internal _paused;
-
-    /// @notice The baseURI may change from an API-based to an ipfs-based
-    string internal _uri;
-
     /// @notice Address used to generate cryptographic signatures for whitelisted addresses
-    ISignatureVerifier internal immutable _signatureVerifier; // This right here drops the size from 29kb to 15kb
-    address internal _signer;
 
     /// @notice set to CLOSED by default
     EMintPhase public mintPhase;
@@ -113,10 +118,36 @@ contract Particlon is
         return _uri;
     }
 
+    /**
+     * @dev See {IERC165-supportsInterface}.
+     */
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(IERC165, ERC721)
+        returns (bool)
+    {
+        return
+            interfaceId == type(IERC721Consumable).interfaceId ||
+            super.supportsInterface(interfaceId);
+    }
+
     /// @notice Andy was here
     function setURI(string memory uri) external onlyOwner {
         _uri = uri;
         emit NewBaseURI(uri);
+    }
+
+    /**
+     * @dev See {IERC721Consumable-consumerOf}
+     */
+    function consumerOf(uint256 _tokenId) external view returns (address) {
+        require(
+            _exists(_tokenId),
+            "ERC721Consumable: consumer query for nonexistent token"
+        );
+        return _tokenConsumers[_tokenId];
     }
 
     function creatorOf(uint256 tokenId)
@@ -311,6 +342,20 @@ contract Particlon is
         _tokenCreatorRoyaltiesRedirect[tokenId] = receiver;
     }
 
+    /**
+     * @dev See {IERC721Consumable-changeConsumer}
+     */
+    function changeConsumer(address _consumer, uint256 _tokenId) external {
+        address owner = this.ownerOf(_tokenId);
+        require(
+            msg.sender == owner ||
+                msg.sender == getApproved(_tokenId) ||
+                isApprovedForAll(owner, msg.sender),
+            "ERC721Consumable: changeConsumer caller is not owner nor approved"
+        );
+        _changeConsumer(owner, _consumer, _tokenId);
+    }
+
     /***********************************|
     |          Only Admin/DAO           |
     |__________________________________*/
@@ -413,6 +458,29 @@ contract Particlon is
     |         Private Functions         |
     |__________________________________*/
 
+    /**
+     * @dev Changes the consumer
+     * Requirement: `tokenId` must exist
+     */
+    function _changeConsumer(
+        address _owner,
+        address _consumer,
+        uint256 _tokenId
+    ) internal {
+        _tokenConsumers[_tokenId] = _consumer;
+        emit ConsumerChanged(_owner, _consumer, _tokenId);
+    }
+
+    function _beforeTokenTransfer(
+        address _from,
+        address _to,
+        uint256 _tokenId
+    ) internal virtual override(ERC721) {
+        super._beforeTokenTransfer(_from, _to, _tokenId);
+
+        _changeConsumer(_from, address(0), _tokenId);
+    }
+
     function _setSalePrice(uint256 tokenId, uint256 salePrice)
         internal
         virtual
@@ -475,7 +543,7 @@ contract Particlon is
         //     );
         // }
 
-        uint256 assetAmount = _getAssetAmount();
+        uint256 assetAmount = _getAssetAmount(newTokenId);
         _chargeParticlon(
             newTokenId,
             "generic",
@@ -486,9 +554,18 @@ contract Particlon is
     }
 
     /// @notice Tokenomics
-    function _getAssetAmount() internal view returns (uint256) {
+    function _getAssetAmount(uint256 tokenId) internal pure returns (uint256) {
         // TODO actually implement the tokenomics
-        return 100;
+        if (tokenId > 9000) {
+            return 468 * 10**18;
+        } else if (tokenId > 6000) {
+            return 500 * 10**18;
+        } else if (tokenId > 3000) {
+            return 1000 * 10**18;
+        } else if (tokenId > 1000) {
+            return 1500 * 10**18;
+        }
+        return 2500 * 10**18;
     }
 
     function _chargeParticlon(
