@@ -13,11 +13,13 @@ If there are no errors, you can now deploy the contracts.
 
 In the `config`, set your `infura` key and `networkId`.
 
+This assumes the `SignatureVerifier` is already deployed. (TODO)
+
 First, the $PUT token needs to be deployed. Run
-- `npm run deployPut`
+- `npm run deployPut` (TODO)
 
 Then run
-- `npm run deployParticlon`
+- `npm run deployParticlon` (TODO)
 
 After that, you need to fill the `Particlon` contract with some $PUT tokens.
 That way, when people mint, they will be able to recieve the tokens nested inside the NFT itself.
