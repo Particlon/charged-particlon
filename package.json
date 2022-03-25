@@ -1,0 +1,31 @@
+{
+  "name": "charged-particlon",
+  "version": "1.0.0",
+  "keywords": [
+    "ethereum",
+    "nft",
+    "non-fungible",
+    "defi"
+  ],
+  "description": "Particlon is the first generative NFT drop from Charged Particles, powered by VASI (Virtual Art Systems & Integration).",
+  "scripts": {
+    "compile": "truffle compile",
+    "test": "truffle test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Particlon/charged-particlon.git"
+  },
+  "author": "Andrija Radica",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Particlon/charged-particlon/issues"
+  },
+  "homepage": "https://github.com/Particlon/charged-particlon#readme",
+  "dependencies": {
+    "@opengsn/contracts": "^2.2.6",
+    "@openzeppelin/contracts": "^4.5.0",
+    "truffle": "^5.5.6",
+    "truffle-contract-size": "^2.0.1"
+  }
+}
