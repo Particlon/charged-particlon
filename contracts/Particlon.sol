@@ -238,7 +238,7 @@ contract Particlon is
         handlePayment(amount)
         returns (bool)
     {
-        uint256 newTokenId = totalSupply + 1;
+        uint256 newTokenId = totalSupply;
         totalSupply += amount;
         // TODO add max supply
         for (uint256 i; i < amount; i++) {
