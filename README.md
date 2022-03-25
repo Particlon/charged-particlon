@@ -1,17 +1,22 @@
 # charged-particlon
+
+![Particlon logo](https://particlon.xyz/assets/img/logo.png)
+
 Particlon is the first generative NFT drop from Charged Particles, powered by VASI (Virtual Art Systems &amp; Integration).
 
 # Setup
 Run:
 1) `npm install`
 
-2) `npm run compile`
+2) `truffle develop`
 
-3) `npm run test`
+3) `migrate`
+
+4) `test`
 
 If there are no errors, you can now deploy the contracts.
 
-In the `config`, set your `infura` key and `networkId`.
+In the `config`, set your `infura` key and `networkId`. (TODO)
 
 This assumes the `SignatureVerifier` is already deployed. (TODO)
 
