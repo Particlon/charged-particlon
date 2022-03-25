@@ -233,7 +233,7 @@ contract Particlon is
         override
         /// string[] calldata tokenMetaUris
         whenNotPaused
-        whenMintPhase(EMintPhase.WHITELIST)
+        whenMintPhase(EMintPhase.PUBLIC)
         whenRemainingSupply
         handlePayment(amount)
         returns (bool)
@@ -262,7 +262,7 @@ contract Particlon is
         override
         /// string[] calldata tokenMetaUris
         whenNotPaused
-        whenMintPhase(EMintPhase.PUBLIC)
+        whenMintPhase(EMintPhase.WHITELIST)
         whenRemainingSupply
         returns (bool)
     {
