@@ -40,6 +40,7 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 interface IParticlon is IERC721 {
     enum EMintPhase {
         CLOSED,
+        CLAIM,
         WHITELIST,
         PUBLIC
     }
@@ -107,6 +108,10 @@ interface IParticlon is IERC721 {
     //     uint256 royaltiesPercent,
     //     uint256 salePrice
     // ) external returns (uint256 newTokenId);
+
+    function mintParticlonsFree(uint256 amount, bytes calldata signature)
+        external
+        returns (bool);
 
     function mintParticlonsPublic(uint256 amount)
         external

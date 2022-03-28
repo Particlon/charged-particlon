@@ -264,6 +264,41 @@ contract Particlon is
         whenNotPaused
         whenMintPhase(EMintPhase.WHITELIST)
         whenRemainingSupply
+        handlePayment(amount)
+        returns (bool)
+    {
+        uint256 newTokenId = totalSupply;
+        totalSupply += amount;
+        require(
+            _signatureVerifier.verify(_signer, msg.sender, amount, signature),
+            "INVALID SIGNATURE"
+        );
+        require(
+            !_whitelistedAddressMinted[msg.sender],
+            "ALREADY CLAIMED WHITELIST"
+        );
+        _whitelistedAddressMinted[msg.sender] = true;
+        for (uint256 i; i < amount; i++) {
+            _createChargedParticlon(
+                ++newTokenId, // increment, then return value
+                msg.sender // creator
+                // 0, // annuityPercent
+                // 0, // royaltiesPercent
+                // 0 // salePrice
+            );
+        }
+
+        return true;
+    }
+
+    function mintParticlonsFree(uint256 amount, bytes calldata signature)
+        external
+        virtual
+        override
+        /// string[] calldata tokenMetaUris
+        whenNotPaused
+        whenMintPhase(EMintPhase.CLAIM)
+        whenRemainingSupply
         returns (bool)
     {
         uint256 newTokenId = totalSupply;

@@ -15,7 +15,7 @@ contract("Particlon & PUT", async accounts => {
 
     await put.mint(particlon.address, web3.utils.toBN("1000000000000000000000"));
 
-    await particlon.setMintPhase(2); // 2 == PUBLIC MINT
+    await particlon.setMintPhase(3); // 3 == PUBLIC MINT
 
     // await particlon.mintParticlonsPublic(10)
     return assert.isTrue(true);
