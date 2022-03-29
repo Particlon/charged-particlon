@@ -26,21 +26,18 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-// import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Pausable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
+import '@openzeppelin/contracts/utils/Strings.sol';
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 import "./interfaces/IParticlon.sol";
-import "./interfaces/IUniverse.sol";
 import "./interfaces/IChargedState.sol";
 import "./interfaces/IChargedSettings.sol";
 import "./interfaces/IChargedParticles.sol";
-
 import "./interfaces/IERC721Consumable.sol";
-
-// import "./lib/SignatureVerifier.sol";
 import "./interfaces/ISignatureVerifier.sol";
 
 import "./lib/TokenInfo.sol";
@@ -49,7 +46,7 @@ import "./lib/RelayRecipient.sol";
 
 contract Particlon is
     IParticlon,
-    ERC721,
+    ERC721Pausable,
     IERC721Consumable,
     Ownable,
     RelayRecipient,
@@ -58,6 +55,7 @@ contract Particlon is
 {
     // using SafeMath for uint256; // not needed since solidity 0.8
     using TokenInfo for address payable;
+    using Strings for uint256;
     // using Counters for Counters.Counter;
 
     address internal _signer;
@@ -65,24 +63,28 @@ contract Particlon is
     /// @notice Using the same naming convention to denote current supply as ERC721Enumerable
     uint256 public totalSupply;
     uint256 public constant MAX_SUPPLY = 10069;
-    uint256 public constant PRICE = 0.15 ether;
+    uint256 public constant INITIAL_PRICE = 0.15 ether;
 
     uint256 internal constant PERCENTAGE_SCALE = 1e4; // 10000  (100%)
     uint256 internal constant MAX_ROYALTIES = 8e3; // 8000   (80%)
 
-    IUniverse internal _universe;
     IChargedState internal _chargedState;
-    IChargedSettings internal _chargedSettings;
+    // IChargedSettings internal _chargedSettings;
     IChargedParticles internal _chargedParticles;
 
-    IERC20 internal _assetToken;
+    address internal _assetToken;
     ISignatureVerifier internal immutable _signatureVerifier; // This right here drops the size from 29kb to 15kb
 
     // Counters.Counter internal _tokenIds;
 
+    uint256 internal _mintPrice;
+
     /// @notice The baseURI may change from an API-based to an ipfs-based
-    string internal _uri;
-    bool internal _paused;
+    /// @notice this should be empty for tokens using an API-based URI
+    ///         this should be set to an IPFS URL for tokens using an IPFS-based URI
+    string internal _baseUri;
+    mapping (uint256 => string) internal _tokenUri;
+
     // Mapping from token ID to consumer address
     mapping(uint256 => address) _tokenConsumers;
 
@@ -108,6 +110,7 @@ contract Particlon is
 
     constructor(address signatureVerifier) ERC721("Particlon", "PART") {
         _signatureVerifier = ISignatureVerifier(signatureVerifier);
+        _mintPrice = INITIAL_PRICE;
     }
 
     /***********************************|
@@ -115,7 +118,17 @@ contract Particlon is
     |__________________________________*/
 
     function baseURI() external view override returns (string memory) {
-        return _uri;
+        return _baseUri;
+    }
+
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+      // Do we have an IPFS-based Token URI?
+      if (bytes(_tokenUri[tokenId]).length > 0) {
+        return _tokenUri[tokenId]; // return
+      }
+
+      // API-based URI
+      return string(abi.encodePacked(_baseUri, tokenId.toString()));
     }
 
     /**
@@ -124,19 +137,12 @@ contract Particlon is
     function supportsInterface(bytes4 interfaceId)
         public
         view
-        virtual
         override(IERC165, ERC721)
         returns (bool)
     {
         return
             interfaceId == type(IERC721Consumable).interfaceId ||
             super.supportsInterface(interfaceId);
-    }
-
-    /// @notice Andy was here
-    function setURI(string memory uri) external onlyOwner {
-        _uri = uri;
-        emit NewBaseURI(uri);
     }
 
     /**
@@ -153,7 +159,6 @@ contract Particlon is
     function creatorOf(uint256 tokenId)
         external
         view
-        virtual
         override
         returns (address)
     {
@@ -163,7 +168,6 @@ contract Particlon is
     function getSalePrice(uint256 tokenId)
         external
         view
-        virtual
         override
         returns (uint256)
     {
@@ -173,7 +177,6 @@ contract Particlon is
     function getLastSellPrice(uint256 tokenId)
         external
         view
-        virtual
         override
         returns (uint256)
     {
@@ -183,7 +186,6 @@ contract Particlon is
     function getCreatorRoyalties(address account)
         external
         view
-        virtual
         override
         returns (uint256)
     {
@@ -193,7 +195,6 @@ contract Particlon is
     function getCreatorRoyaltiesPct(uint256 tokenId)
         external
         view
-        virtual
         override
         returns (uint256)
     {
@@ -203,7 +204,6 @@ contract Particlon is
     function getCreatorRoyaltiesReceiver(uint256 tokenId)
         external
         view
-        virtual
         override
         returns (address)
     {
@@ -212,7 +212,6 @@ contract Particlon is
 
     function claimCreatorRoyalties()
         external
-        virtual
         override
         nonReentrant
         whenNotPaused
@@ -226,102 +225,108 @@ contract Particlon is
     |__________________________________*/
 
     /// @notice Andy was here
-    function mintParticlonsPublic(uint256 amount)
+    function mint(uint256 amount)
         external
         payable
-        virtual
         override
         /// string[] calldata tokenMetaUris
+        nonReentrant
         whenNotPaused
         whenMintPhase(EMintPhase.PUBLIC)
         whenRemainingSupply
-        handlePayment(amount)
+        requirePayment(amount)
         returns (bool)
     {
-        uint256 newTokenId = totalSupply;
-        totalSupply += amount;
-        // TODO add max supply
-        for (uint256 i; i < amount; i++) {
-            _createChargedParticlon(
-                ++newTokenId, // increment, then return value
-                msg.sender // creator
-                // 0, // annuityPercent
-                // 0, // royaltiesPercent
-                // 0 // salePrice
-            );
-        }
+        // They may have minted 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
+        uint256 actualPrice = _mintAmount(amount);
+        _refundOverpayment(actualPrice, 0); // dont worry about gasLimit here as the "minter" could only hook themselves
+        return true;
+    }
 
+    function mintWithUris(uint256 amount, string[] calldata tokenUris)
+        external
+        payable
+        override
+        nonReentrant
+        whenNotPaused
+        whenMintPhase(EMintPhase.PUBLIC)
+        whenRemainingSupply
+        requirePayment(amount)
+        returns (bool)
+    {
+        // They may have minted 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
+        uint256 actualPrice = _mintAmountWithUris(amount, tokenUris);
+        _refundOverpayment(actualPrice, 0); // dont worry about gasLimit here as the "minter" could only hook themselves
         return true;
     }
 
     /// @notice Andy was here
-    function mintParticlonsWhitelist(uint256 amount, bytes calldata signature)
+    function mintWhitelist(uint256 amount, bytes calldata signature)
         external
         payable
-        virtual
         override
         /// string[] calldata tokenMetaUris
+        nonReentrant
         whenNotPaused
         whenMintPhase(EMintPhase.WHITELIST)
         whenRemainingSupply
-        handlePayment(amount)
+        requirePayment(amount)
+        requireWhitelist(amount, signature)
         returns (bool)
     {
-        uint256 newTokenId = totalSupply;
-        totalSupply += amount;
-        require(
-            _signatureVerifier.verify(_signer, msg.sender, amount, signature),
-            "INVALID SIGNATURE"
-        );
-        require(
-            !_whitelistedAddressMinted[msg.sender],
-            "ALREADY CLAIMED WHITELIST"
-        );
-        _whitelistedAddressMinted[msg.sender] = true;
-        for (uint256 i; i < amount; i++) {
-            _createChargedParticlon(
-                ++newTokenId, // increment, then return value
-                msg.sender // creator
-                // 0, // annuityPercent
-                // 0, // royaltiesPercent
-                // 0 // salePrice
-            );
-        }
-
+        // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
+        uint256 actualPrice = _mintAmount(amount);
+        _refundOverpayment(actualPrice, 0);
         return true;
     }
 
-    function mintParticlonsFree(uint256 amount, bytes calldata signature)
+    /// @notice Andy was here
+    function mintWhitelistWithUris(uint256 amount, bytes calldata signature, string[] calldata tokenUris)
         external
-        virtual
+        payable
+        override
+        /// string[] calldata tokenMetaUris
+        nonReentrant
+        whenNotPaused
+        whenMintPhase(EMintPhase.WHITELIST)
+        whenRemainingSupply
+        requirePayment(amount)
+        requireWhitelist(amount, signature)
+        returns (bool)
+    {
+        // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
+        uint256 actualPrice = _mintAmountWithUris(amount, tokenUris);
+        _refundOverpayment(actualPrice, 0);
+        return true;
+    }
+
+    function mintFree(uint256 amount, bytes calldata signature)
+        external
         override
         /// string[] calldata tokenMetaUris
         whenNotPaused
         whenMintPhase(EMintPhase.CLAIM)
         whenRemainingSupply
+        requireWhitelist(amount, signature)
         returns (bool)
     {
-        uint256 newTokenId = totalSupply;
-        totalSupply += amount;
-        require(
-            _signatureVerifier.verify(_signer, msg.sender, amount, signature),
-            "INVALID SIGNATURE"
-        );
-        require(
-            !_whitelistedAddressMinted[msg.sender],
-            "ALREADY CLAIMED WHITELIST"
-        );
-        _whitelistedAddressMinted[msg.sender] = true;
-        for (uint256 i; i < amount; i++) {
-            _createChargedParticlon(
-                ++newTokenId, // increment, then return value
-                msg.sender // creator
-                // 0, // annuityPercent
-                // 0, // royaltiesPercent
-                // 0 // salePrice
-            );
-        }
+        // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
+        _mintAmount(amount);
+        return true;
+    }
 
+    function mintFreeWithUris(uint256 amount, bytes calldata signature, string[] calldata tokenUris)
+        external
+        override
+        /// string[] calldata tokenMetaUris
+        whenNotPaused
+        whenMintPhase(EMintPhase.CLAIM)
+        whenRemainingSupply
+        requireWhitelist(amount, signature)
+        returns (bool)
+    {
+        // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
+        _mintAmountWithUris(amount, tokenUris);
         return true;
     }
 
@@ -332,7 +337,6 @@ contract Particlon is
     function buyParticlon(uint256 tokenId, uint256 gasLimit)
         external
         payable
-        virtual
         override
         nonReentrant
         whenNotPaused
@@ -348,7 +352,6 @@ contract Particlon is
 
     function setSalePrice(uint256 tokenId, uint256 salePrice)
         external
-        virtual
         override
         whenNotPaused
         onlyTokenOwnerOrApproved(tokenId)
@@ -358,7 +361,6 @@ contract Particlon is
 
     function setRoyaltiesPct(uint256 tokenId, uint256 royaltiesPct)
         external
-        virtual
         override
         whenNotPaused
         onlyTokenCreator(tokenId)
@@ -369,7 +371,6 @@ contract Particlon is
 
     function setCreatorRoyaltiesReceiver(uint256 tokenId, address receiver)
         external
-        virtual
         override
         whenNotPaused
         onlyTokenCreator(tokenId)
@@ -383,9 +384,9 @@ contract Particlon is
     function changeConsumer(address _consumer, uint256 _tokenId) external {
         address owner = this.ownerOf(_tokenId);
         require(
-            msg.sender == owner ||
-                msg.sender == getApproved(_tokenId) ||
-                isApprovedForAll(owner, msg.sender),
+            _msgSender() == owner ||
+                _msgSender() == getApproved(_tokenId) ||
+                isApprovedForAll(owner, _msgSender()),
             "ERC721Consumable: changeConsumer caller is not owner nor approved"
         );
         _changeConsumer(owner, _consumer, _tokenId);
@@ -403,8 +404,21 @@ contract Particlon is
     }
 
     function setAssetToken(address assetToken) external onlyOwner {
-        _assetToken = IERC20(assetToken);
+        _assetToken = assetToken;
+        // Need to Approve Charged Particles to transfer Assets from Particlon
+        IERC20(assetToken).approve(address(_chargedParticles), type(uint256).max);
         emit AssetTokenSet(assetToken);
+    }
+
+    function setMintPrice(uint256 price) external onlyOwner {
+        _mintPrice = price;
+        emit NewMintPrice(price);
+    }
+
+    /// @notice Andy was here
+    function setURI(string memory uri) external onlyOwner {
+        _baseUri = uri;
+        emit NewBaseURI(uri);
     }
 
     function setMintPhase(EMintPhase _mintPhase) external onlyOwner {
@@ -412,17 +426,8 @@ contract Particlon is
         emit NewMintPhase(_mintPhase);
     }
 
-    function setPausedState(bool state) external virtual onlyOwner {
-        _paused = state;
-        emit PausedStateSet(state);
-    }
-
-    /**
-     * @dev Setup the ChargedParticles Interface
-     */
-    function setUniverse(address universe) external virtual onlyOwner {
-        _universe = IUniverse(universe);
-        emit UniverseSet(universe);
+    function setPausedState(bool state) external onlyOwner {
+        state ? _pause() : _unpause(); // these emit events
     }
 
     /**
@@ -430,7 +435,6 @@ contract Particlon is
      */
     function setChargedParticles(address chargedParticles)
         external
-        virtual
         onlyOwner
     {
         _chargedParticles = IChargedParticles(chargedParticles);
@@ -440,7 +444,6 @@ contract Particlon is
     /// @dev Setup the Charged-State Controller
     function setChargedState(address stateController)
         external
-        virtual
         onlyOwner
     {
         _chargedState = IChargedState(stateController);
@@ -448,14 +451,13 @@ contract Particlon is
     }
 
     /// @dev Setup the Charged-Settings Controller
-    function setChargedSettings(address settings) external virtual onlyOwner {
-        _chargedSettings = IChargedSettings(settings);
-        emit ChargedSettingsSet(settings);
-    }
+    // function setChargedSettings(address settings) external onlyOwner {
+    //     _chargedSettings = IChargedSettings(settings);
+    //     emit ChargedSettingsSet(settings);
+    // }
 
     function setTrustedForwarder(address _trustedForwarder)
         external
-        virtual
         onlyOwner
     {
         _setTrustedForwarder(_trustedForwarder); // Andy was here, trustedForwarder is already defined in opengsn/contracts/src/BaseRelayRecipient.sol
@@ -493,6 +495,44 @@ contract Particlon is
     |         Private Functions         |
     |__________________________________*/
 
+    function _mintAmount(uint256 amount) internal returns (uint256 actualPrice) {
+        uint256 newTokenId = totalSupply;
+        if (totalSupply + amount > MAX_SUPPLY) {
+            amount = MAX_SUPPLY - totalSupply;
+        }
+        totalSupply += amount;
+        actualPrice = amount * _mintPrice; // Charge people for the ACTUAL amount minted;
+
+        for (uint i; i < amount; i++) {
+            _createChargedParticlon(
+                ++newTokenId,
+                _msgSender()
+            );
+        }
+    }
+
+    function _mintAmountWithUris(uint256 amount, string[] calldata tokenUris)
+      internal
+      returns (uint256 actualPrice)
+    {
+        require(tokenUris.length == amount, "Token URIs does not match amount");
+
+        uint256 newTokenId = totalSupply;
+        if (totalSupply + amount > MAX_SUPPLY) {
+            amount = MAX_SUPPLY - totalSupply;
+        }
+        totalSupply += amount;
+        actualPrice = amount * _mintPrice; // Charge people for the ACTUAL amount minted;
+
+        for (uint i; i < amount; i++) {
+            _createChargedParticlonWithUri(
+                ++newTokenId,
+                _msgSender(),
+                tokenUris[i]
+            );
+        }
+    }
+
     /**
      * @dev Changes the consumer
      * Requirement: `tokenId` must exist
@@ -506,27 +546,20 @@ contract Particlon is
         emit ConsumerChanged(_owner, _consumer, _tokenId);
     }
 
-    function _beforeTokenTransfer(
-        address _from,
-        address _to,
-        uint256 _tokenId
-    ) internal virtual override(ERC721) {
-        super._beforeTokenTransfer(_from, _to, _tokenId);
-
-        _changeConsumer(_from, address(0), _tokenId);
-    }
-
     function _setSalePrice(uint256 tokenId, uint256 salePrice)
         internal
-        virtual
     {
         _tokenSalePrice[tokenId] = salePrice;
+
+        // Temp-Lock/Unlock NFT
+        //  prevents front-running the sale and draining the value of the NFT just before sale
+        _chargedState.setTemporaryLock(address(this), tokenId, (salePrice > 0));
+
         emit SalePriceSet(tokenId, salePrice);
     }
 
     function _setRoyaltiesPct(uint256 tokenId, uint256 royaltiesPct)
         internal
-        virtual
     {
         require(royaltiesPct <= MAX_ROYALTIES, "PRT:E-421"); // Andy was here
         _tokenCreatorRoyaltiesPct[tokenId] = royaltiesPct;
@@ -536,7 +569,6 @@ contract Particlon is
     function _creatorRoyaltiesReceiver(uint256 tokenId)
         internal
         view
-        virtual
         returns (address)
     {
         address receiver = _tokenCreatorRoyaltiesRedirect[tokenId];
@@ -547,45 +579,21 @@ contract Particlon is
     }
 
     // Andy was here
-    function _createChargedParticlon(uint256 newTokenId, address creator)
-        internal
-        virtual
-    // uint256 annuityPercent,
-    // uint256 royaltiesPercent,
-    // uint256 salePrice
-    {
-        // _tokenIds.increment();
-
+    function _createChargedParticlon(uint256 newTokenId, address creator) internal {
         _safeMint(creator, newTokenId, "");
         _tokenCreator[newTokenId] = creator;
-
-        // _setTokenURI(newTokenId, tokenMetaUri);
-
-        // if (royaltiesPercent > 0) {
-        //     _setRoyaltiesPct(newTokenId, royaltiesPercent);
-        // }
-
-        // if (salePrice > 0) {
-        //     _setSalePrice(newTokenId, salePrice);
-        // }
-
-        // if (annuityPercent > 0) {
-        //     _chargedSettings.setCreatorAnnuities(
-        //         address(this),
-        //         newTokenId,
-        //         creator,
-        //         annuityPercent
-        //     );
-        // }
 
         uint256 assetAmount = _getAssetAmount(newTokenId);
         _chargeParticlon(
             newTokenId,
             "generic",
-            address(_assetToken),
-            assetAmount,
-            owner()
+            assetAmount
         );
+    }
+
+    function _createChargedParticlonWithUri(uint256 newTokenId, address creator, string calldata tokenUri) internal {
+        _createChargedParticlon(newTokenId, creator);
+        _tokenUri[newTokenId] = tokenUri;
     }
 
     /// @notice Tokenomics
@@ -606,28 +614,21 @@ contract Particlon is
     function _chargeParticlon(
         uint256 tokenId,
         string memory walletManagerId,
-        address assetToken,
-        uint256 assetAmount,
-        address referrer
-    ) internal virtual {
-        /// Not needed since the assetTokens will reside in this contracts in the first place
-        // _collectAssetToken(_msgSender(), assetToken, assetAmount);
-
-        // IERC20(assetToken).approve(address(_chargedParticles), assetAmount);
-
+        uint256 assetAmount
+    ) internal {
+        address _self = address(this);
         _chargedParticles.energizeParticle(
-            address(this),
+            _self,
             tokenId,
             walletManagerId,
-            assetToken,
+            _assetToken,
             assetAmount,
-            referrer
+            _self
         );
     }
 
     function _buyParticlon(uint256 _tokenId, uint256 _gasLimit)
         internal
-        virtual
         returns (
             address contractAddress,
             uint256 tokenId,
@@ -645,7 +646,7 @@ contract Particlon is
         require(msg.value >= salePrice, "PRT:E-414");
 
         uint256 ownerAmount = salePrice;
-        creatorAmount;
+        // creatorAmount;
         oldOwner = ownerOf(_tokenId);
         newOwner = _msgSender();
 
@@ -666,18 +667,11 @@ contract Particlon is
         // Reserve Royalties for Creator
         // Andy was here - removed SafeMath
         if (creatorAmount > 0) {
-            _tokenCreatorClaimableRoyalties[royaltiesReceiver] =
-                _tokenCreatorClaimableRoyalties[royaltiesReceiver] +
-                creatorAmount;
+            _tokenCreatorClaimableRoyalties[royaltiesReceiver] += creatorAmount;
         }
 
         // Transfer Token
         _transfer(oldOwner, newOwner, _tokenId);
-
-        // Transfer Payment
-        if (ownerAmount > 0) {
-            payable(oldOwner).sendValue(ownerAmount, _gasLimit);
-        }
 
         emit ParticlonSold(
             _tokenId,
@@ -688,21 +682,11 @@ contract Particlon is
             creatorAmount
         );
 
-        _refundOverpayment(salePrice, _gasLimit);
-
-        // Andy was here
-        // Signal to Universe Controller
-        if (address(_universe) != address(0)) {
-            _universe.onProtonSale(
-                contractAddress,
-                tokenId,
-                oldOwner,
-                newOwner,
-                salePrice,
-                royaltiesReceiver,
-                creatorAmount
-            );
+        // Transfer Payment
+        if (ownerAmount > 0) {
+            payable(oldOwner).sendValue(ownerAmount, _gasLimit);
         }
+        _refundOverpayment(salePrice, _gasLimit);
     }
 
     /**
@@ -712,7 +696,6 @@ contract Particlon is
      */
     function _claimCreatorRoyalties(address receiver)
         internal
-        virtual
         returns (uint256)
     {
         uint256 claimableAmount = _tokenCreatorClaimableRoyalties[receiver];
@@ -729,7 +712,6 @@ contract Particlon is
 
     function _refundOverpayment(uint256 threshold, uint256 gasLimit)
         internal
-        virtual
     {
         // Andy was here, removed SafeMath
         uint256 overage = msg.value - threshold;
@@ -742,7 +724,7 @@ contract Particlon is
         address from,
         address to,
         uint256 tokenId
-    ) internal virtual override {
+    ) internal override {
         // Unlock NFT
         _tokenSalePrice[tokenId] = 0; // Andy was here
         _chargedState.setTemporaryLock(address(this), tokenId, false);
@@ -759,7 +741,6 @@ contract Particlon is
     function _msgSender()
         internal
         view
-        virtual
         override(BaseRelayRecipient, Context)
         returns (address)
     {
@@ -770,7 +751,6 @@ contract Particlon is
     function _msgData()
         internal
         view
-        virtual
         override(BaseRelayRecipient, Context)
         returns (bytes memory)
     {
@@ -787,20 +767,27 @@ contract Particlon is
         _;
     }
 
-    modifier whenNotPaused() {
-        require(!_paused, "PRT:E-101");
+    modifier whenRemainingSupply() {
+        require(totalSupply < MAX_SUPPLY, "SUPPLY LIMIT");
         _;
     }
 
-    modifier whenRemainingSupply() {
-        _; // runs the function first
-        require(totalSupply <= MAX_SUPPLY, "SUPPLY LIMIT");
+    modifier requirePayment(uint256 amount) {
+        uint256 fullPrice = amount * _mintPrice;
+        require(msg.value >= fullPrice, "LOW ETH");
+        _;
     }
 
-    modifier handlePayment(uint256 amount) {
-        uint256 threshold = amount * PRICE;
-        require(msg.value >= threshold, "LOW ETH");
-        _refundOverpayment(threshold, 21000); // TODO check gasLimit
+    modifier requireWhitelist(uint256 amount, bytes calldata signature) {
+      require(
+            _signatureVerifier.verify(_signer, _msgSender(), amount, signature),
+            "INVALID SIGNATURE"
+        );
+        require(
+            !_whitelistedAddressMinted[_msgSender()],
+            "ALREADY CLAIMED WHITELIST"
+        );
+        _whitelistedAddressMinted[_msgSender()] = true;
         _;
     }
 

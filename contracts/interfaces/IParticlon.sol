@@ -48,17 +48,15 @@ interface IParticlon is IERC721 {
     event NewBaseURI(string indexed _uri);
     event NewSignerAddress(address indexed signer);
     event NewMintPhase(EMintPhase indexed mintPhase);
+    event NewMintPrice(uint256 price);
 
     event AssetTokenSet(address indexed assetToken);
-    event UniverseSet(address indexed universe);
     event ChargedStateSet(address indexed chargedState);
     event ChargedSettingsSet(address indexed chargedSettings);
     event ChargedParticlesSet(address indexed chargedParticles);
 
-    event PausedStateSet(bool isPaused);
     event SalePriceSet(uint256 indexed tokenId, uint256 salePrice);
     event CreatorRoyaltiesSet(uint256 indexed tokenId, uint256 royaltiesPct);
-    event FeesWithdrawn(address indexed receiver, uint256 amount);
     event ParticlonSold(
         uint256 indexed tokenId,
         address indexed oldOwner,
@@ -109,18 +107,33 @@ interface IParticlon is IERC721 {
     //     uint256 salePrice
     // ) external returns (uint256 newTokenId);
 
-    function mintParticlonsFree(uint256 amount, bytes calldata signature)
-        external
-        returns (bool);
 
-    function mintParticlonsPublic(uint256 amount)
+    function mint(uint256 amount)
         external
         payable
         returns (bool);
 
-    function mintParticlonsWhitelist(uint256 amount, bytes calldata signature)
+    function mintWithUris(uint256 amount, string[] calldata tokenUris)
         external
         payable
+        returns (bool);
+
+    function mintWhitelist(uint256 amount, bytes calldata signature)
+        external
+        payable
+        returns (bool);
+
+    function mintWhitelistWithUris(uint256 amount, bytes calldata signature, string[] calldata tokenUris)
+        external
+        payable
+        returns (bool);
+
+    function mintFree(uint256 amount, bytes calldata signature)
+        external
+        returns (bool);
+
+    function mintFreeWithUris(uint256 amount, bytes calldata signature, string[] calldata tokenUris)
+        external
         returns (bool);
 
     // function batchParticlonsForSale(
