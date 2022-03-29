@@ -23,60 +23,10 @@
 
 pragma solidity ^0.8.0;
 
-import "./IWalletManager.sol";
-import "./IBasketManager.sol";
-
 /**
  * @notice Interface for Charged Settings
  */
 interface IChargedSettings {
-    /***********************************|
-    |             Public API            |
-    |__________________________________*/
-
-    // function isContractOwner(address contractAddress, address account) external view returns (bool);
-    function getCreatorAnnuities(address contractAddress, uint256 tokenId)
-        external
-        returns (address creator, uint256 annuityPct);
-
-    function getCreatorAnnuitiesRedirect(
-        address contractAddress,
-        uint256 tokenId
-    ) external view returns (address);
-
-    function getTempLockExpiryBlocks() external view returns (uint256);
-
-    function getTimelockApprovals(address operator)
-        external
-        view
-        returns (bool timelockAny, bool timelockOwn);
-
-    function getAssetRequirements(address contractAddress, address assetToken)
-        external
-        view
-        returns (
-            string memory requiredWalletManager,
-            bool energizeEnabled,
-            bool restrictedAssets,
-            bool validAsset,
-            uint256 depositCap,
-            uint256 depositMin,
-            uint256 depositMax,
-            bool invalidAsset
-        );
-
-    function getNftAssetRequirements(
-        address contractAddress,
-        address nftTokenAddress
-    )
-        external
-        view
-        returns (
-            string memory requiredBasketManager,
-            bool basketEnabled,
-            uint256 maxNfts
-        );
-
     /***********************************|
     |         Only NFT Creator          |
     |__________________________________*/
@@ -131,78 +81,4 @@ interface IChargedSettings {
         address nftTokenAddress,
         uint256 maxNfts
     ) external;
-
-    /***********************************|
-    |          Only Admin/DAO           |
-    |__________________________________*/
-
-    function setAssetInvalidity(address assetToken, bool invalidity) external;
-
-    function enableNftContracts(address[] calldata contracts) external;
-
-    function setPermsForCharge(address contractAddress, bool state) external;
-
-    function setPermsForBasket(address contractAddress, bool state) external;
-
-    function setPermsForTimelockAny(address contractAddress, bool state)
-        external;
-
-    function setPermsForTimelockSelf(address contractAddress, bool state)
-        external;
-
-    /***********************************|
-    |          Particle Events          |
-    |__________________________________*/
-
-    event Initialized(address indexed initiator);
-    event ControllerSet(address indexed controllerAddress, string controllerId);
-    event DepositCapSet(address assetToken, uint256 depositCap);
-    event TempLockExpirySet(uint256 expiryBlocks);
-
-    event RequiredWalletManagerSet(
-        address indexed contractAddress,
-        string walletManager
-    );
-    event RequiredBasketManagerSet(
-        address indexed contractAddress,
-        string basketManager
-    );
-    event AssetTokenRestrictionsSet(
-        address indexed contractAddress,
-        bool restrictionsEnabled
-    );
-    event AllowedAssetTokenSet(
-        address indexed contractAddress,
-        address assetToken,
-        bool isAllowed
-    );
-    event AssetTokenLimitsSet(
-        address indexed contractAddress,
-        address assetToken,
-        uint256 assetDepositMin,
-        uint256 assetDepositMax
-    );
-    event MaxNftsSet(
-        address indexed contractAddress,
-        address indexed nftTokenAddress,
-        uint256 maxNfts
-    );
-    event AssetInvaliditySet(address indexed assetToken, bool invalidity);
-
-    event TokenCreatorConfigsSet(
-        address indexed contractAddress,
-        uint256 indexed tokenId,
-        address indexed creatorAddress,
-        uint256 annuityPercent
-    );
-    event TokenCreatorAnnuitiesRedirected(
-        address indexed contractAddress,
-        uint256 indexed tokenId,
-        address indexed redirectAddress
-    );
-
-    event PermsSetForCharge(address indexed contractAddress, bool state);
-    event PermsSetForBasket(address indexed contractAddress, bool state);
-    event PermsSetForTimelockAny(address indexed contractAddress, bool state);
-    event PermsSetForTimelockSelf(address indexed contractAddress, bool state);
 }

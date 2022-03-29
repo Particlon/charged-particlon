@@ -1,6 +1,10 @@
+
 const SignatureVerifier = artifacts.require("SignatureVerifier");
 const Particlon = artifacts.require("Particlon");
 const PUT = artifacts.require("ParticlonUtilityToken");
+
+const ChargedParticlesMock = artifacts.require("ChargedParticlesMock");
+const ChargedStateMock = artifacts.require("ChargedStateMock");
 
 /*
  * uncomment accounts to access the test accounts made available by the
@@ -13,11 +17,41 @@ contract("Particlon & PUT", async accounts => {
     const particlon = await Particlon.deployed(signatureVerifier.address);
     const put = await PUT.deployed();
 
-    await put.mint(particlon.address, web3.utils.toBN("1000000000000000000000"));
+    const chargedParticlesMock = await ChargedParticlesMock.deployed();
+    const chargedStateMock = await ChargedStateMock.deployed();
 
-    await particlon.setMintPhase(3); // 3 == PUBLIC MINT
+    await put.mint(particlon.address, web3.utils.toWei("1000"));
 
-    // await particlon.mintParticlonsPublic(10)
+    // DO These First!
+
+    // Set Charged Particles
+    await particlon.setChargedParticles(chargedParticlesMock.address);
+
+    // Set Charged State
+    await particlon.setChargedState(chargedStateMock.address);
+
+
+    // Then Initializee Particlon
+
+    // Set Base URI
+    const baseURI = "my base uri here";
+    await particlon.setURI(baseURI);
+
+    // Set Mint Phase
+    const mintPhase = 3; // 3 == PUBLIC MINT
+    await particlon.setMintPhase(mintPhase);
+
+    // Set Asset Token
+    await particlon.setAssetToken(put.address);
+
+
+    // Then Mint!!
+
+    const price = 0.15;
+    const amountToMint = 10;
+    const payment = web3.utils.toWei('' + (amountToMint * price), 'ether');
+    await particlon.mint.call(10, {value: payment});
+
     return assert.isTrue(true);
   });
 });
