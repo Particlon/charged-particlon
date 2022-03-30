@@ -107,32 +107,14 @@ interface IParticlon is IERC721 {
     //     uint256 salePrice
     // ) external returns (uint256 newTokenId);
 
-
-    function mint(uint256 amount)
-        external
-        payable
-        returns (bool);
-
-    function mintWithUris(uint256 amount, string[] calldata tokenUris)
-        external
-        payable
-        returns (bool);
+    function mint(uint256 amount) external payable returns (bool);
 
     function mintWhitelist(uint256 amount, bytes calldata signature)
         external
         payable
         returns (bool);
 
-    function mintWhitelistWithUris(uint256 amount, bytes calldata signature, string[] calldata tokenUris)
-        external
-        payable
-        returns (bool);
-
     function mintFree(uint256 amount, bytes calldata signature)
-        external
-        returns (bool);
-
-    function mintFreeWithUris(uint256 amount, bytes calldata signature, string[] calldata tokenUris)
         external
         returns (bool);
 

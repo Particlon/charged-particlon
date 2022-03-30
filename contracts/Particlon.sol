@@ -24,11 +24,11 @@
 pragma solidity ^0.8.0;
 //pragma experimental ABIEncoderV2; // default since 0.8
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+// import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Pausable.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+// import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -80,11 +80,7 @@ contract Particlon is
 
     uint256 internal _mintPrice;
 
-    /// @notice The baseURI may change from an API-based to an ipfs-based
-    /// @notice this should be empty for tokens using an API-based URI
-    ///         this should be set to an IPFS URL for tokens using an IPFS-based URI
     string internal _baseUri;
-    mapping(uint256 => string) internal _tokenUri;
 
     // Mapping from token ID to consumer address
     mapping(uint256 => address) _tokenConsumers;
@@ -98,7 +94,8 @@ contract Particlon is
     mapping(uint256 => uint256) internal _tokenLastSellPrice;
 
     /// @notice Adhere to limits per whitelisted wallet for whitelist mint phase
-    mapping(address => bool) internal _whitelistedAddressMinted;
+    mapping(address => uint256) internal _whitelistedAddressMinted;
+    mapping(address => uint256) internal _mintPassMinted;
 
     /// @notice Address used to generate cryptographic signatures for whitelisted addresses
 
@@ -120,21 +117,6 @@ contract Particlon is
 
     function baseURI() external view override returns (string memory) {
         return _baseUri;
-    }
-
-    function tokenURI(uint256 tokenId)
-        public
-        view
-        override
-        returns (string memory)
-    {
-        // Do we have an IPFS-based Token URI?
-        if (bytes(_tokenUri[tokenId]).length > 0) {
-            return _tokenUri[tokenId]; // return
-        }
-
-        // API-based URI
-        return string(abi.encodePacked(_baseUri, tokenId.toString()));
     }
 
     // Define an "onlyOwner" switch
@@ -254,23 +236,6 @@ contract Particlon is
         return true;
     }
 
-    function mintWithUris(uint256 amount, string[] calldata tokenUris)
-        external
-        payable
-        override
-        nonReentrant
-        whenNotPaused
-        whenMintPhase(EMintPhase.PUBLIC)
-        whenRemainingSupply
-        requirePayment(amount)
-        returns (bool)
-    {
-        // They may have minted 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
-        uint256 actualPrice = _mintAmountWithUris(amount, tokenUris);
-        _refundOverpayment(actualPrice, 0); // dont worry about gasLimit here as the "minter" could only hook themselves
-        return true;
-    }
-
     /// @notice Andy was here
     function mintWhitelist(uint256 amount, bytes calldata signature)
         external
@@ -291,30 +256,6 @@ contract Particlon is
         return true;
     }
 
-    /// @notice Andy was here
-    function mintWhitelistWithUris(
-        uint256 amount,
-        bytes calldata signature,
-        string[] calldata tokenUris
-    )
-        external
-        payable
-        override
-        /// string[] calldata tokenMetaUris
-        nonReentrant
-        whenNotPaused
-        whenMintPhase(EMintPhase.WHITELIST)
-        whenRemainingSupply
-        requirePayment(amount)
-        requireWhitelist(amount, signature)
-        returns (bool)
-    {
-        // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
-        uint256 actualPrice = _mintAmountWithUris(amount, tokenUris);
-        _refundOverpayment(actualPrice, 0);
-        return true;
-    }
-
     function mintFree(uint256 amount, bytes calldata signature)
         external
         override
@@ -322,30 +263,11 @@ contract Particlon is
         whenNotPaused
         whenMintPhase(EMintPhase.CLAIM)
         whenRemainingSupply
-        requireWhitelist(amount, signature)
+        requirePass(amount, signature)
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
         _mintAmount(amount);
-        return true;
-    }
-
-    function mintFreeWithUris(
-        uint256 amount,
-        bytes calldata signature,
-        string[] calldata tokenUris
-    )
-        external
-        override
-        /// string[] calldata tokenMetaUris
-        whenNotPaused
-        whenMintPhase(EMintPhase.CLAIM)
-        whenRemainingSupply
-        requireWhitelist(amount, signature)
-        returns (bool)
-    {
-        // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
-        _mintAmountWithUris(amount, tokenUris);
         return true;
     }
 
@@ -524,28 +446,6 @@ contract Particlon is
         }
     }
 
-    function _mintAmountWithUris(uint256 amount, string[] calldata tokenUris)
-        internal
-        returns (uint256 actualPrice)
-    {
-        require(tokenUris.length == amount, "Token URIs does not match amount");
-
-        uint256 newTokenId = totalSupply;
-        if (totalSupply + amount > MAX_SUPPLY) {
-            amount = MAX_SUPPLY - totalSupply;
-        }
-        totalSupply += amount;
-        actualPrice = amount * _mintPrice; // Charge people for the ACTUAL amount minted;
-
-        for (uint256 i; i < amount; i++) {
-            _createChargedParticlonWithUri(
-                ++newTokenId,
-                _msgSender(),
-                tokenUris[i]
-            );
-        }
-    }
-
     /**
      * @dev Changes the consumer
      * Requirement: `tokenId` must exist
@@ -608,15 +508,6 @@ contract Particlon is
 
         uint256 assetAmount = _getAssetAmount(newTokenId);
         _chargeParticlon(newTokenId, "generic", assetAmount);
-    }
-
-    function _createChargedParticlonWithUri(
-        uint256 newTokenId,
-        address creator,
-        string calldata tokenUri
-    ) internal {
-        _createChargedParticlon(newTokenId, creator);
-        _tokenUri[newTokenId] = tokenUri;
     }
 
     /// @notice Tokenomics
@@ -805,10 +696,24 @@ contract Particlon is
             "INVALID SIGNATURE"
         );
         require(
-            !_whitelistedAddressMinted[_msgSender()],
+            _whitelistedAddressMinted[_msgSender()] < amount,
             "ALREADY CLAIMED WHITELIST"
         );
-        _whitelistedAddressMinted[_msgSender()] = true;
+        _whitelistedAddressMinted[_msgSender()] += amount;
+        _;
+    }
+
+    /// @notice A snapshot is taken before the mint (mint pass NFT count is taken into consideration)
+    modifier requirePass(uint256 amount, bytes calldata signature) {
+        require(
+            _signatureVerifier.verify(_signer, _msgSender(), amount, signature),
+            "INVALID SIGNATURE"
+        );
+        require(
+            _mintPassMinted[_msgSender()] < amount,
+            "ALREADY CLAIMED WHITELIST"
+        );
+        _mintPassMinted[_msgSender()] += amount;
         _;
     }
 
