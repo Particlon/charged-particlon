@@ -563,7 +563,7 @@ contract Particlon is
         address _from,
         address _to,
         uint256 _tokenId
-    ) internal virtual override(ERC721) {
+    ) internal virtual override(ERC721Pausable) {
         super._beforeTokenTransfer(_from, _to, _tokenId);
 
         if (_revokeConsumerOnTransfer) {
