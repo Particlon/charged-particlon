@@ -50,7 +50,9 @@ contract("Particlon & PUT", async accounts => {
     const price = 0.15;
     const amountToMint = 10;
     const payment = web3.utils.toWei('' + (amountToMint * price), 'ether');
-    await particlon.mint.call(10, {value: payment});
+
+    await particlon.mint.call(amountToMint, { value: payment });
+    await particlon.withdrawEther(accounts[1], payment);
 
     return assert.isTrue(true);
   });
