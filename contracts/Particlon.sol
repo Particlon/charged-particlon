@@ -27,7 +27,8 @@ pragma solidity ^0.8.0;
 // import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Pausable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "./lib/ERC721A.sol";
 // import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
@@ -45,9 +46,10 @@ import "./lib/RelayRecipient.sol";
 
 contract Particlon is
     IParticlon,
-    ERC721Pausable,
+    ERC721A,
     IERC721Consumable,
     Ownable,
+    Pausable,
     RelayRecipient,
     ReentrancyGuard,
     BlackholePrevention
@@ -59,9 +61,6 @@ contract Particlon is
 
     bool internal _revokeConsumerOnTransfer;
     address internal _signer;
-
-    /// @notice Using the same naming convention to denote current supply as ERC721Enumerable
-    uint256 public totalSupply;
 
     uint256 internal _nonceClaim = 69;
     uint256 internal _nonceWL = 420;
@@ -109,7 +108,7 @@ contract Particlon is
     |          Initialization           |
     |__________________________________*/
 
-    constructor(address signatureVerifier) ERC721("Particlon", "PART") {
+    constructor(address signatureVerifier) ERC721A("Particlon", "PART") {
         _signatureVerifier = ISignatureVerifier(signatureVerifier);
         _mintPrice = INITIAL_PRICE;
     }
@@ -133,7 +132,7 @@ contract Particlon is
     function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(IERC165, ERC721)
+        override(IERC165, ERC721A)
         returns (bool)
     {
         return
@@ -234,7 +233,7 @@ contract Particlon is
         returns (bool)
     {
         // They may have minted 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
-        uint256 actualPrice = _mintAmount(amount);
+        uint256 actualPrice = _mintAmount(amount, _msgSender());
         _refundOverpayment(actualPrice, 0); // dont worry about gasLimit here as the "minter" could only hook themselves
         return true;
     }
@@ -258,7 +257,7 @@ contract Particlon is
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
-        uint256 actualPrice = _mintAmount(amount);
+        uint256 actualPrice = _mintAmount(amount, _msgSender());
         _refundOverpayment(actualPrice, 0);
         return true;
     }
@@ -278,7 +277,7 @@ contract Particlon is
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
-        _mintAmount(amount);
+        _mintAmount(amount, _msgSender());
         return true;
     }
 
@@ -448,19 +447,28 @@ contract Particlon is
     |         Private Functions         |
     |__________________________________*/
 
-    function _mintAmount(uint256 amount)
+    function _mintAmount(uint256 amount, address creator)
         internal
         returns (uint256 actualPrice)
     {
-        uint256 newTokenId = totalSupply;
-        if (totalSupply + amount > MAX_SUPPLY) {
-            amount = MAX_SUPPLY - totalSupply;
+        uint256 newTokenId = totalSupply();
+        // newTokenId is equal to the supply at this stage
+        if (newTokenId + amount > MAX_SUPPLY) {
+            amount = MAX_SUPPLY - newTokenId;
         }
-        totalSupply += amount;
+        // totalSupply += amount;
+
+        // _safeMint's second argument now takes in a quantity, not a tokenId.
+        _safeMint(_msgSender(), amount);
         actualPrice = amount * _mintPrice; // Charge people for the ACTUAL amount minted;
 
+        // Put ERC20 tokens into the Particlons
         for (uint256 i; i < amount; i++) {
-            _createChargedParticlon(++newTokenId, _msgSender());
+            // _createChargedParticlon(++newTokenId, _msgSender());
+            _tokenCreator[newTokenId] = creator;
+            uint256 assetAmount = _getAssetAmount(newTokenId);
+            _chargeParticlon(newTokenId, "generic", assetAmount);
+            newTokenId++;
         }
     }
 
@@ -477,15 +485,22 @@ contract Particlon is
         emit ConsumerChanged(_owner, _consumer, _tokenId);
     }
 
-    function _beforeTokenTransfer(
+    function _beforeTokenTransfers(
         address _from,
         address _to,
-        uint256 _tokenId
-    ) internal virtual override(ERC721Pausable) {
-        super._beforeTokenTransfer(_from, _to, _tokenId);
+        uint256 _startTokenId,
+        uint256 _quantity
+    ) internal virtual override(ERC721A) {
+        super._beforeTokenTransfers(_from, _to, _startTokenId, _quantity);
+
+        require(!paused(), "ERC721Pausable: token transfer while paused");
 
         if (_revokeConsumerOnTransfer) {
-            _changeConsumer(_from, address(0), _tokenId);
+            uint256 _tokenId = _startTokenId;
+            for (uint256 i; i < _quantity; i++) {
+                _changeConsumer(_from, address(0), _tokenId);
+                _tokenId++;
+            }
         }
     }
 
@@ -515,17 +530,6 @@ contract Particlon is
             receiver = _tokenCreator[tokenId];
         }
         return receiver;
-    }
-
-    // Andy was here
-    function _createChargedParticlon(uint256 newTokenId, address creator)
-        internal
-    {
-        _safeMint(creator, newTokenId, "");
-        _tokenCreator[newTokenId] = creator;
-
-        uint256 assetAmount = _getAssetAmount(newTokenId);
-        _chargeParticlon(newTokenId, "generic", assetAmount);
     }
 
     /// @notice Tokenomics
@@ -686,6 +690,23 @@ contract Particlon is
         return BaseRelayRecipient._msgData();
     }
 
+    /// @dev This is missing from ERC721A for some reason.
+    function _isApprovedOrOwner(address spender, uint256 tokenId)
+        internal
+        view
+        virtual
+        returns (bool)
+    {
+        require(
+            _exists(tokenId),
+            "ERC721: operator query for nonexistent token"
+        );
+        address owner = ownerOf(tokenId);
+        return (spender == owner ||
+            isApprovedForAll(owner, spender) ||
+            getApproved(tokenId) == spender);
+    }
+
     /***********************************|
     |             Modifiers             |
     |__________________________________*/
@@ -697,7 +718,7 @@ contract Particlon is
     }
 
     modifier whenRemainingSupply() {
-        require(totalSupply < MAX_SUPPLY, "SUPPLY LIMIT");
+        require(totalSupply() < MAX_SUPPLY, "SUPPLY LIMIT");
         _;
     }
 
