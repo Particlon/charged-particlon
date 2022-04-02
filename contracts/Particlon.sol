@@ -35,7 +35,6 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 import "./interfaces/IParticlon.sol";
 import "./interfaces/IChargedState.sol";
-import "./interfaces/IChargedSettings.sol";
 import "./interfaces/IChargedParticles.sol";
 import "./interfaces/IERC721Consumable.sol";
 import "./interfaces/ISignatureVerifier.sol";
