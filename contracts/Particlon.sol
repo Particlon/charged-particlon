@@ -512,7 +512,6 @@ contract Particlon is
 
     /// @notice Tokenomics
     function _getAssetAmount(uint256 tokenId) internal pure returns (uint256) {
-        // TODO actually implement the tokenomics
         if (tokenId > 9000) {
             return 468 * 10**18;
         } else if (tokenId > 6000) {
@@ -692,7 +691,13 @@ contract Particlon is
 
     modifier requireWhitelist(uint256 amount, bytes calldata signature) {
         require(
-            _signatureVerifier.verify(_signer, _msgSender(), amount, signature),
+            _signatureVerifier.verify(
+                _signer,
+                _msgSender(),
+                amount,
+                0, // prevent WL signatures being used for claiming
+                signature
+            ),
             "INVALID SIGNATURE"
         );
         require(
@@ -706,7 +711,13 @@ contract Particlon is
     /// @notice A snapshot is taken before the mint (mint pass NFT count is taken into consideration)
     modifier requirePass(uint256 amount, bytes calldata signature) {
         require(
-            _signatureVerifier.verify(_signer, _msgSender(), amount, signature),
+            _signatureVerifier.verify(
+                _signer,
+                _msgSender(),
+                amount,
+                420, // for the culture
+                signature
+            ),
             "INVALID SIGNATURE"
         );
         require(
