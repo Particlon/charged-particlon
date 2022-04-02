@@ -109,14 +109,17 @@ interface IParticlon is IERC721 {
 
     function mint(uint256 amount) external payable returns (bool);
 
-    function mintWhitelist(uint256 amount, bytes calldata signature)
-        external
-        payable
-        returns (bool);
+    function mintWhitelist(
+        uint256 amount,
+        uint256 nonce,
+        bytes calldata signature
+    ) external payable returns (bool);
 
-    function mintFree(uint256 amount, bytes calldata signature)
-        external
-        returns (bool);
+    function mintFree(
+        uint256 amount,
+        uint256 nonce,
+        bytes calldata signature
+    ) external returns (bool);
 
     // function batchParticlonsForSale(
     //     address creator,

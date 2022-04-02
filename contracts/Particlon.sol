@@ -62,6 +62,10 @@ contract Particlon is
 
     /// @notice Using the same naming convention to denote current supply as ERC721Enumerable
     uint256 public totalSupply;
+
+    uint256 internal _nonceClaim = 69;
+    uint256 internal _nonceWL = 420;
+
     uint256 public constant MAX_SUPPLY = 10069;
     uint256 public constant INITIAL_PRICE = 0.15 ether;
 
@@ -236,7 +240,11 @@ contract Particlon is
     }
 
     /// @notice Andy was here
-    function mintWhitelist(uint256 amount, bytes calldata signature)
+    function mintWhitelist(
+        uint256 amount,
+        uint256 nonce,
+        bytes calldata signature
+    )
         external
         payable
         override
@@ -246,7 +254,7 @@ contract Particlon is
         whenMintPhase(EMintPhase.WHITELIST)
         whenRemainingSupply
         requirePayment(amount)
-        requireWhitelist(amount, signature)
+        requireWhitelist(amount, nonce, signature)
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
@@ -255,14 +263,18 @@ contract Particlon is
         return true;
     }
 
-    function mintFree(uint256 amount, bytes calldata signature)
+    function mintFree(
+        uint256 amount,
+        uint256 nonce,
+        bytes calldata signature
+    )
         external
         override
         /// string[] calldata tokenMetaUris
         whenNotPaused
         whenMintPhase(EMintPhase.CLAIM)
         whenRemainingSupply
-        requirePass(amount, signature)
+        requirePass(amount, nonce, signature)
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
@@ -341,6 +353,13 @@ contract Particlon is
     function setSignerAddress(address signer) external onlyOwner {
         _signer = signer;
         emit NewSignerAddress(signer);
+    }
+
+    // In case we need to "undo" a signature/prevent it from being used,
+    // we also need to remake all
+    function setNonces(uint256 nonceClaim, uint256 nonceWL) external onlyOwner {
+        _nonceClaim = nonceClaim;
+        _nonceWL = nonceWL;
     }
 
     function setAssetToken(address assetToken) external onlyOwner {
@@ -688,13 +707,17 @@ contract Particlon is
         _;
     }
 
-    modifier requireWhitelist(uint256 amount, bytes calldata signature) {
+    modifier requireWhitelist(
+        uint256 amount,
+        uint256 nonce,
+        bytes calldata signature
+    ) {
         require(
             _signatureVerifier.verify(
                 _signer,
                 _msgSender(),
                 amount,
-                0, // prevent WL signatures being used for claiming
+                nonce, // prevent WL signatures being used for claiming
                 signature
             ),
             "INVALID SIGNATURE"
@@ -708,13 +731,17 @@ contract Particlon is
     }
 
     /// @notice A snapshot is taken before the mint (mint pass NFT count is taken into consideration)
-    modifier requirePass(uint256 amount, bytes calldata signature) {
+    modifier requirePass(
+        uint256 amount,
+        uint256 nonce,
+        bytes calldata signature
+    ) {
         require(
             _signatureVerifier.verify(
                 _signer,
                 _msgSender(),
                 amount,
-                420, // for the culture
+                nonce,
                 signature
             ),
             "INVALID SIGNATURE"
