@@ -227,7 +227,7 @@ contract Particlon is
         /// string[] calldata tokenMetaUris
         nonReentrant
         whenNotPaused
-        whenMintPhase(EMintPhase.PUBLIC)
+        notBeforePhase(EMintPhase.PUBLIC)
         whenRemainingSupply
         requirePayment(amount)
         returns (bool)
@@ -240,7 +240,8 @@ contract Particlon is
 
     /// @notice Andy was here
     function mintWhitelist(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     )
@@ -250,20 +251,21 @@ contract Particlon is
         /// string[] calldata tokenMetaUris
         nonReentrant
         whenNotPaused
-        whenMintPhase(EMintPhase.WHITELIST)
+        notBeforePhase(EMintPhase.WHITELIST)
         whenRemainingSupply
-        requirePayment(amount)
-        requireWhitelist(amount, nonce, signature)
+        requirePayment(amountMint)
+        requireWhitelist(amountMint, amountAllowed, nonce, signature)
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
-        uint256 actualPrice = _mintAmount(amount, _msgSender());
+        uint256 actualPrice = _mintAmount(amountMint, _msgSender());
         _refundOverpayment(actualPrice, 0);
         return true;
     }
 
     function mintFree(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     )
@@ -271,13 +273,13 @@ contract Particlon is
         override
         /// string[] calldata tokenMetaUris
         whenNotPaused
-        whenMintPhase(EMintPhase.CLAIM)
+        notBeforePhase(EMintPhase.CLAIM)
         whenRemainingSupply
-        requirePass(amount, nonce, signature)
+        requirePass(amountMint, amountAllowed, nonce, signature)
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
-        _mintAmount(amount, _msgSender());
+        _mintAmount(amountMint, _msgSender());
         return true;
     }
 
@@ -459,17 +461,19 @@ contract Particlon is
         // totalSupply += amount;
 
         // _safeMint's second argument now takes in a quantity, not a tokenId.
-        _safeMint(_msgSender(), amount);
+        _safeMint(creator, amount);
         actualPrice = amount * _mintPrice; // Charge people for the ACTUAL amount minted;
 
-        // Put ERC20 tokens into the Particlons
+        uint256 assetAmount;
+        newTokenId++;
         for (uint256 i; i < amount; i++) {
-            // _createChargedParticlon(++newTokenId, _msgSender());
-            _tokenCreator[newTokenId] = creator;
-            uint256 assetAmount = _getAssetAmount(newTokenId);
-            _chargeParticlon(newTokenId, "generic", assetAmount);
-            newTokenId++;
+            // Set the first minters as the creators
+            _tokenCreator[newTokenId + i] = creator;
+            assetAmount += _getAssetAmount(newTokenId + i);
+            // _chargeParticlon(newTokenId, "generic", assetAmount);
         }
+        // Put all ERC20 tokens into the first Particlon to save a lot of gas
+        _chargeParticlon(newTokenId, "generic", assetAmount);
     }
 
     /**
@@ -712,8 +716,8 @@ contract Particlon is
     |__________________________________*/
 
     // Andy was here
-    modifier whenMintPhase(EMintPhase _mintPhase) {
-        require(mintPhase == _mintPhase, "MINT PHASE ERR");
+    modifier notBeforePhase(EMintPhase _mintPhase) {
+        require(mintPhase >= _mintPhase, "MINT PHASE ERR");
         _;
     }
 
@@ -729,49 +733,56 @@ contract Particlon is
     }
 
     modifier requireWhitelist(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     ) {
+        require(amountMint <= amountAllowed, "AMOUNT ERR");
+        require(nonce == _nonceWL, "NONCE ERR");
         require(
             _signatureVerifier.verify(
                 _signer,
                 _msgSender(),
-                amount,
+                amountAllowed,
                 nonce, // prevent WL signatures being used for claiming
                 signature
             ),
-            "INVALID SIGNATURE"
+            "SIGNATURE ERR"
         );
         require(
-            _whitelistedAddressMinted[_msgSender()] < amount,
-            "ALREADY CLAIMED WHITELIST"
+            _whitelistedAddressMinted[_msgSender()] + amountMint <=
+                amountAllowed,
+            "CLAIMED ALL"
         );
-        _whitelistedAddressMinted[_msgSender()] += amount;
+        _whitelistedAddressMinted[_msgSender()] += amountMint;
         _;
     }
 
     /// @notice A snapshot is taken before the mint (mint pass NFT count is taken into consideration)
     modifier requirePass(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     ) {
+        require(amountMint <= amountAllowed, "AMOUNT ERR");
+        require(nonce == _nonceClaim, "NONCE ERR");
         require(
             _signatureVerifier.verify(
                 _signer,
                 _msgSender(),
-                amount,
+                amountAllowed,
                 nonce,
                 signature
             ),
-            "INVALID SIGNATURE"
+            "SIGNATURE ERR"
         );
         require(
-            _mintPassMinted[_msgSender()] < amount,
-            "ALREADY CLAIMED WHITELIST"
+            _mintPassMinted[_msgSender()] + amountMint <= amountAllowed,
+            "CLAIMED ALL"
         );
-        _mintPassMinted[_msgSender()] += amount;
+        _mintPassMinted[_msgSender()] += amountMint;
         _;
     }
 
