@@ -13,16 +13,17 @@ const ChargedStateMock = artifacts.require("ChargedStateMock");
  */
 contract("Particlon & PUT", async accounts => {
   it("should assert true", async function () {
-    const signatureVerifier = await SignatureVerifier.deployed();
-    const particlon = await Particlon.deployed(signatureVerifier.address);
+    // const signatureVerifier = await SignatureVerifier.deployed();
+    // const particlon = await Particlon.deployed(signatureVerifier.address);
+    const particlon = await Particlon.deployed();
     const put = await PUT.deployed();
 
     const chargedParticlesMock = await ChargedParticlesMock.deployed();
     const chargedStateMock = await ChargedStateMock.deployed();
 
-    await put.mint(particlon.address, web3.utils.toWei("1000"));
+    await put.mint(particlon.address, web3.utils.toWei("150000000", "ether"));
 
-    // DO These First!
+    // // DO These First!
 
     // Set Charged Particles
     await particlon.setChargedParticles(chargedParticlesMock.address);
@@ -31,13 +32,13 @@ contract("Particlon & PUT", async accounts => {
     await particlon.setChargedState(chargedStateMock.address);
 
 
-    // Then Initializee Particlon
+    // // Then Initializee Particlon
 
-    // Set Base URI
+    // // Set Base URI
     const baseURI = "my base uri here";
     await particlon.setURI(baseURI);
 
-    // Set Mint Phase
+    // // Set Mint Phase
     const mintPhase = 3; // 3 == PUBLIC MINT
     await particlon.setMintPhase(mintPhase);
 

@@ -16,7 +16,10 @@ contract ParticlonUtilityToken is ERC20, ERC20Burnable, AccessControl {
     }
 
     function mint(address to, uint256 amount) public onlyRole(MINTER_ROLE) {
-        require(totalSupply() + amount <= 15 * 10**18, "Capped supply");
+        require(
+            totalSupply() + amount <= 150_000_000 * 10**18,
+            "Capped supply (150,000,000)"
+        );
         _mint(to, amount);
     }
 

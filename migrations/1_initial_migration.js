@@ -10,7 +10,8 @@ module.exports = function (deployer, network, accounts) {
   deployer.then(async () => {
     await deployer.deploy(Migrations);
     await deployer.deploy(SignatureVerifier);
-    await deployer.deploy(Particlon, SignatureVerifier.address);
+    // await deployer.deploy(Particlon, SignatureVerifier.address);
+    await deployer.deploy(Particlon);
     await deployer.deploy(PUT);
 
     if (network === 'test') {
