@@ -88,7 +88,8 @@ contract Particlon is
 
     uint256 internal _mintPrice;
 
-    string internal _baseUri;
+    string internal _baseUri =
+        "ipfs://QmQrdG1cESrBenNUaTmxckFm4gJwgLdkqTGxNLuh4t5vo8/";
 
     // Mapping from token ID to consumer address
     mapping(uint256 => address) _tokenConsumers;
@@ -498,16 +499,16 @@ contract Particlon is
         uint256 _startTokenId,
         uint256 _quantity
     ) internal virtual override(ERC721A) {
+        if (_from == address(0)) {
+            return;
+        }
         super._beforeTokenTransfers(_from, _to, _startTokenId, _quantity);
 
         require(!paused(), "ERC721Pausable: token transfer while paused");
 
         if (_revokeConsumerOnTransfer) {
-            uint256 _tokenId = _startTokenId;
-            for (uint256 i; i < _quantity; i++) {
-                _changeConsumer(_from, address(0), _tokenId);
-                _tokenId++;
-            }
+            /// @notice quantity is always one in this case
+            _changeConsumer(_from, address(0), _startTokenId);
         }
     }
 
@@ -726,7 +727,7 @@ contract Particlon is
     }
 
     modifier whenRemainingSupply() {
-        require(totalSupply() < MAX_SUPPLY, "SUPPLY LIMIT");
+        require(totalSupply() <= MAX_SUPPLY, "SUPPLY LIMIT");
         _;
     }
 
