@@ -117,10 +117,6 @@ contract Particlon is
     |              Public               |
     |__________________________________*/
 
-    function baseURI() external view override returns (string memory) {
-        return _baseUri;
-    }
-
     // Define an "onlyOwner" switch
     function setRevokeConsumerOnTransfer(bool state) external onlyOwner {
         _revokeConsumerOnTransfer = state;
@@ -448,6 +444,10 @@ contract Particlon is
     /***********************************|
     |         Private Functions         |
     |__________________________________*/
+
+    function _baseURI() internal view override returns (string memory) {
+        return _baseUri;
+    }
 
     function _mintAmount(uint256 amount, address creator)
         internal
