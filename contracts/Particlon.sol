@@ -22,13 +22,10 @@
 // SOFTWARE.
 
 pragma solidity ^0.8.0;
-//pragma experimental ABIEncoderV2; // default since 0.8
-
-// import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Pausable.sol";
-// import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -39,15 +36,17 @@ import "./interfaces/IChargedParticles.sol";
 import "./interfaces/IERC721Consumable.sol";
 import "./interfaces/ISignatureVerifier.sol";
 
+import "./lib/ERC721A.sol";
 import "./lib/TokenInfo.sol";
 import "./lib/BlackholePrevention.sol";
 import "./lib/RelayRecipient.sol";
 
 contract Particlon is
     IParticlon,
-    ERC721Pausable,
+    ERC721A,
     IERC721Consumable,
     Ownable,
+    Pausable,
     RelayRecipient,
     ReentrancyGuard,
     BlackholePrevention
@@ -55,13 +54,12 @@ contract Particlon is
     // using SafeMath for uint256; // not needed since solidity 0.8
     using TokenInfo for address payable;
     using Strings for uint256;
-    // using Counters for Counters.Counter;
 
+    /// @dev In case we want to revoke the consumer part
     bool internal _revokeConsumerOnTransfer;
-    address internal _signer;
 
-    /// @notice Using the same naming convention to denote current supply as ERC721Enumerable
-    uint256 public totalSupply;
+    /// @notice Address used to generate cryptographic signatures for whitelisted addresses
+    address internal _signer = 0xE8cF9826C7702411bb916c447D759E0E631d2e68;
 
     uint256 internal _nonceClaim = 69;
     uint256 internal _nonceWL = 420;
@@ -72,14 +70,21 @@ contract Particlon is
     uint256 internal constant PERCENTAGE_SCALE = 1e4; // 10000  (100%)
     uint256 internal constant MAX_ROYALTIES = 8e3; // 8000   (80%)
 
-    IChargedState internal _chargedState;
+    // Charged Particles V1 mainnet
+
+    IChargedState internal _chargedState =
+        IChargedState(0xB29256073C63960daAa398f1227D0adBC574341C);
     // IChargedSettings internal _chargedSettings;
-    IChargedParticles internal _chargedParticles;
+    IChargedParticles internal _chargedParticles =
+        IChargedParticles(0xaB1a1410EA40930755C1330Cc0fB3367897C8c41);
 
+    /// @notice This needs to be set using the setAssetToken in order to get approved
     address internal _assetToken;
-    ISignatureVerifier internal immutable _signatureVerifier; // This right here drops the size from 29kb to 15kb
 
-    // Counters.Counter internal _tokenIds;
+    // This right here drops the size so it doesn't break the limitation
+    // Enable optimization also has to be tured on!
+    ISignatureVerifier internal constant _signatureVerifier =
+        ISignatureVerifier(0x47a0915747565E8264296457b894068fe5CA9186);
 
     uint256 internal _mintPrice;
 
@@ -96,11 +101,11 @@ contract Particlon is
     mapping(uint256 => uint256) internal _tokenSalePrice;
     mapping(uint256 => uint256) internal _tokenLastSellPrice;
 
-    /// @notice Adhere to limits per whitelisted wallet for whitelist mint phase
-    mapping(address => uint256) internal _whitelistedAddressMinted;
+    /// @notice Adhere to limits per whitelisted wallet for claim mint phase
     mapping(address => uint256) internal _mintPassMinted;
 
-    /// @notice Address used to generate cryptographic signatures for whitelisted addresses
+    /// @notice Adhere to limits per whitelisted wallet for whitelist mint phase
+    mapping(address => uint256) internal _whitelistedAddressMinted;
 
     /// @notice set to CLOSED by default
     EMintPhase public mintPhase;
@@ -109,18 +114,13 @@ contract Particlon is
     |          Initialization           |
     |__________________________________*/
 
-    constructor(address signatureVerifier) ERC721("Particlon", "PART") {
-        _signatureVerifier = ISignatureVerifier(signatureVerifier);
+    constructor() ERC721A("Particlon", "PART") {
         _mintPrice = INITIAL_PRICE;
     }
 
     /***********************************|
     |              Public               |
     |__________________________________*/
-
-    function baseURI() external view override returns (string memory) {
-        return _baseUri;
-    }
 
     // Define an "onlyOwner" switch
     function setRevokeConsumerOnTransfer(bool state) external onlyOwner {
@@ -133,7 +133,7 @@ contract Particlon is
     function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(IERC165, ERC721)
+        override(IERC165, ERC721A)
         returns (bool)
     {
         return
@@ -225,60 +225,59 @@ contract Particlon is
         external
         payable
         override
-        /// string[] calldata tokenMetaUris
         nonReentrant
         whenNotPaused
-        whenMintPhase(EMintPhase.PUBLIC)
+        notBeforePhase(EMintPhase.PUBLIC)
         whenRemainingSupply
         requirePayment(amount)
         returns (bool)
     {
         // They may have minted 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
-        uint256 actualPrice = _mintAmount(amount);
+        uint256 actualPrice = _mintAmount(amount, _msgSender());
         _refundOverpayment(actualPrice, 0); // dont worry about gasLimit here as the "minter" could only hook themselves
         return true;
     }
 
     /// @notice Andy was here
     function mintWhitelist(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     )
         external
         payable
         override
-        /// string[] calldata tokenMetaUris
         nonReentrant
         whenNotPaused
-        whenMintPhase(EMintPhase.WHITELIST)
+        notBeforePhase(EMintPhase.WHITELIST)
         whenRemainingSupply
-        requirePayment(amount)
-        requireWhitelist(amount, nonce, signature)
+        requirePayment(amountMint)
+        requireWhitelist(amountMint, amountAllowed, nonce, signature)
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2, so only pay for 2
-        uint256 actualPrice = _mintAmount(amount);
+        uint256 actualPrice = _mintAmount(amountMint, _msgSender());
         _refundOverpayment(actualPrice, 0);
         return true;
     }
 
     function mintFree(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     )
         external
         override
-        /// string[] calldata tokenMetaUris
         whenNotPaused
-        whenMintPhase(EMintPhase.CLAIM)
+        notBeforePhase(EMintPhase.CLAIM)
         whenRemainingSupply
-        requirePass(amount, nonce, signature)
+        requirePass(amountMint, amountAllowed, nonce, signature)
         returns (bool)
     {
         // They may have been whitelisted to mint 10, but if only 2 remain in supply, then they will only get 2
-        _mintAmount(amount);
+        _mintAmount(amountMint, _msgSender());
         return true;
     }
 
@@ -348,7 +347,7 @@ contract Particlon is
     |          Only Admin/DAO           |
     |__________________________________*/
 
-    // Andy was here
+    // Andy was here (Andy is everywhere)
 
     function setSignerAddress(address signer) external onlyOwner {
         _signer = signer;
@@ -356,7 +355,8 @@ contract Particlon is
     }
 
     // In case we need to "undo" a signature/prevent it from being used,
-    // we also need to remake all
+    // This is easier than changing the signer
+    // we would also need to remake all unused signatures
     function setNonces(uint256 nonceClaim, uint256 nonceWL) external onlyOwner {
         _nonceClaim = nonceClaim;
         _nonceWL = nonceWL;
@@ -377,7 +377,7 @@ contract Particlon is
         emit NewMintPrice(price);
     }
 
-    /// @notice Andy was here
+    /// @notice This is needed for the reveal
     function setURI(string memory uri) external onlyOwner {
         _baseUri = uri;
         emit NewBaseURI(uri);
@@ -428,7 +428,7 @@ contract Particlon is
         _withdrawEther(receiver, amount);
     }
 
-    function withdrawErc20(
+    function withdrawERC20(
         address payable receiver,
         address tokenAddress,
         uint256 amount
@@ -448,20 +448,35 @@ contract Particlon is
     |         Private Functions         |
     |__________________________________*/
 
-    function _mintAmount(uint256 amount)
+    function _baseURI() internal view override returns (string memory) {
+        return _baseUri;
+    }
+
+    function _mintAmount(uint256 amount, address creator)
         internal
         returns (uint256 actualPrice)
     {
-        uint256 newTokenId = totalSupply;
-        if (totalSupply + amount > MAX_SUPPLY) {
-            amount = MAX_SUPPLY - totalSupply;
+        uint256 newTokenId = totalSupply();
+        // newTokenId is equal to the supply at this stage
+        if (newTokenId + amount > MAX_SUPPLY) {
+            amount = MAX_SUPPLY - newTokenId;
         }
-        totalSupply += amount;
+        // totalSupply += amount;
+
+        // _safeMint's second argument now takes in a quantity, not a tokenId.
+        _safeMint(creator, amount);
         actualPrice = amount * _mintPrice; // Charge people for the ACTUAL amount minted;
 
+        uint256 assetAmount;
+        newTokenId++;
         for (uint256 i; i < amount; i++) {
-            _createChargedParticlon(++newTokenId, _msgSender());
+            // Set the first minters as the creators
+            _tokenCreator[newTokenId + i] = creator;
+            assetAmount += _getAssetAmount(newTokenId + i);
+            // _chargeParticlon(newTokenId, "generic", assetAmount);
         }
+        // Put all ERC20 tokens into the first Particlon to save a lot of gas
+        _chargeParticlon(newTokenId, "generic", assetAmount);
     }
 
     /**
@@ -477,15 +492,22 @@ contract Particlon is
         emit ConsumerChanged(_owner, _consumer, _tokenId);
     }
 
-    function _beforeTokenTransfer(
+    function _beforeTokenTransfers(
         address _from,
         address _to,
-        uint256 _tokenId
-    ) internal virtual override(ERC721Pausable) {
-        super._beforeTokenTransfer(_from, _to, _tokenId);
+        uint256 _startTokenId,
+        uint256 _quantity
+    ) internal virtual override(ERC721A) {
+        super._beforeTokenTransfers(_from, _to, _startTokenId, _quantity);
+
+        require(!paused(), "ERC721Pausable: token transfer while paused");
 
         if (_revokeConsumerOnTransfer) {
-            _changeConsumer(_from, address(0), _tokenId);
+            uint256 _tokenId = _startTokenId;
+            for (uint256 i; i < _quantity; i++) {
+                _changeConsumer(_from, address(0), _tokenId);
+                _tokenId++;
+            }
         }
     }
 
@@ -517,27 +539,18 @@ contract Particlon is
         return receiver;
     }
 
-    // Andy was here
-    function _createChargedParticlon(uint256 newTokenId, address creator)
-        internal
-    {
-        _safeMint(creator, newTokenId, "");
-        _tokenCreator[newTokenId] = creator;
-
-        uint256 assetAmount = _getAssetAmount(newTokenId);
-        _chargeParticlon(newTokenId, "generic", assetAmount);
-    }
-
-    /// @notice Tokenomics
+    /// @notice The tokens from a batch are being nested into the first NFT minted in that batch
     function _getAssetAmount(uint256 tokenId) internal pure returns (uint256) {
-        if (tokenId > 9000) {
-            return 468 * 10**18;
+        if (tokenId == MAX_SUPPLY) {
+            return 1596 * 10**18;
+        } else if (tokenId > 9000) {
+            return 1403 * 10**18;
         } else if (tokenId > 6000) {
-            return 500 * 10**18;
-        } else if (tokenId > 3000) {
             return 1000 * 10**18;
-        } else if (tokenId > 1000) {
+        } else if (tokenId > 3000) {
             return 1500 * 10**18;
+        } else if (tokenId > 1000) {
+            return 1750 * 10**18;
         }
         return 2500 * 10**18;
     }
@@ -596,7 +609,6 @@ contract Particlon is
         _tokenLastSellPrice[_tokenId] = salePrice;
 
         // Reserve Royalties for Creator
-        // Andy was here - removed SafeMath
         if (creatorAmount > 0) {
             _tokenCreatorClaimableRoyalties[royaltiesReceiver] += creatorAmount;
         }
@@ -686,18 +698,35 @@ contract Particlon is
         return BaseRelayRecipient._msgData();
     }
 
+    /// @dev This is missing from ERC721A for some reason.
+    function _isApprovedOrOwner(address spender, uint256 tokenId)
+        internal
+        view
+        virtual
+        returns (bool)
+    {
+        require(
+            _exists(tokenId),
+            "ERC721: operator query for nonexistent token"
+        );
+        address owner = ownerOf(tokenId);
+        return (spender == owner ||
+            isApprovedForAll(owner, spender) ||
+            getApproved(tokenId) == spender);
+    }
+
     /***********************************|
     |             Modifiers             |
     |__________________________________*/
 
     // Andy was here
-    modifier whenMintPhase(EMintPhase _mintPhase) {
-        require(mintPhase == _mintPhase, "MINT PHASE ERR");
+    modifier notBeforePhase(EMintPhase _mintPhase) {
+        require(mintPhase >= _mintPhase, "MINT PHASE ERR");
         _;
     }
 
     modifier whenRemainingSupply() {
-        require(totalSupply < MAX_SUPPLY, "SUPPLY LIMIT");
+        require(totalSupply() < MAX_SUPPLY, "SUPPLY LIMIT");
         _;
     }
 
@@ -708,49 +737,56 @@ contract Particlon is
     }
 
     modifier requireWhitelist(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     ) {
+        require(amountMint <= amountAllowed, "AMOUNT ERR");
+        require(nonce == _nonceWL, "NONCE ERR");
         require(
             _signatureVerifier.verify(
                 _signer,
                 _msgSender(),
-                amount,
+                amountAllowed,
                 nonce, // prevent WL signatures being used for claiming
                 signature
             ),
-            "INVALID SIGNATURE"
+            "SIGNATURE ERR"
         );
         require(
-            _whitelistedAddressMinted[_msgSender()] < amount,
-            "ALREADY CLAIMED WHITELIST"
+            _whitelistedAddressMinted[_msgSender()] + amountMint <=
+                amountAllowed,
+            "CLAIM ERR"
         );
-        _whitelistedAddressMinted[_msgSender()] += amount;
+        _whitelistedAddressMinted[_msgSender()] += amountMint;
         _;
     }
 
     /// @notice A snapshot is taken before the mint (mint pass NFT count is taken into consideration)
     modifier requirePass(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     ) {
+        require(amountMint <= amountAllowed, "AMOUNT ERR");
+        require(nonce == _nonceClaim, "NONCE ERR");
         require(
             _signatureVerifier.verify(
                 _signer,
                 _msgSender(),
-                amount,
+                amountAllowed,
                 nonce,
                 signature
             ),
-            "INVALID SIGNATURE"
+            "SIGNATURE ERR"
         );
         require(
-            _mintPassMinted[_msgSender()] < amount,
-            "ALREADY CLAIMED WHITELIST"
+            _mintPassMinted[_msgSender()] + amountMint <= amountAllowed,
+            "CLAIM ERR"
         );
-        _mintPassMinted[_msgSender()] += amount;
+        _mintPassMinted[_msgSender()] += amountMint;
         _;
     }
 

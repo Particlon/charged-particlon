@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Creator: Taz (https://solidity-by-example.org/)
+// Modified by 0xapetoshi.eth
 
 pragma solidity ^0.8.0;
 

@@ -110,13 +110,15 @@ interface IParticlon is IERC721 {
     function mint(uint256 amount) external payable returns (bool);
 
     function mintWhitelist(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     ) external payable returns (bool);
 
     function mintFree(
-        uint256 amount,
+        uint256 amountMint,
+        uint256 amountAllowed,
         uint256 nonce,
         bytes calldata signature
     ) external returns (bool);
@@ -137,8 +139,6 @@ interface IParticlon is IERC721 {
     // ) external returns (bool);
 
     // Andy was here
-    /// @dev Using a baseURI removes the need to set each tokenURI
-    function baseURI() external view returns (string memory);
 
     /***********************************|
     |     Only Token Creator/Owner      |
