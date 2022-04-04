@@ -539,13 +539,13 @@ contract Particlon is
     /// @notice Tokenomics
     function _getAssetAmount(uint256 tokenId) internal pure returns (uint256) {
         if (tokenId > 9000) {
-            return 468 * 10**18;
+            return 1403 * 10**18;
         } else if (tokenId > 6000) {
-            return 500 * 10**18;
-        } else if (tokenId > 3000) {
             return 1000 * 10**18;
-        } else if (tokenId > 1000) {
+        } else if (tokenId > 3000) {
             return 1500 * 10**18;
+        } else if (tokenId > 1000) {
+            return 1750 * 10**18;
         }
         return 2500 * 10**18;
     }
