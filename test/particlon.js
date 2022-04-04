@@ -21,7 +21,7 @@ contract("Particlon & PUT", async accounts => {
     const chargedParticlesMock = await ChargedParticlesMock.deployed();
     const chargedStateMock = await ChargedStateMock.deployed();
 
-    await put.mint(particlon.address, web3.utils.toWei("150000000", "ether"));
+    await put.mint(particlon.address, web3.utils.toWei("15000000", "ether"));
 
     // // DO These First!
 
