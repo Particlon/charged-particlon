@@ -88,7 +88,8 @@ contract Particlon is
 
     uint256 internal _mintPrice;
 
-    string internal _baseUri;
+    string internal _baseUri =
+        "ipfs://QmQrdG1cESrBenNUaTmxckFm4gJwgLdkqTGxNLuh4t5vo8/";
 
     // Mapping from token ID to consumer address
     mapping(uint256 => address) _tokenConsumers;
